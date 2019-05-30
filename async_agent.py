@@ -120,7 +120,7 @@ if __name__ == '__main__':
     sess = tf.InteractiveSession()
     coord = tf.train.Coordinator()
 
-    reward_clip = config.reward_clip[0]
+    reward_clip = config.reward_clip[1]
 
     global_network = impala.IMPALA(
         sess=sess,

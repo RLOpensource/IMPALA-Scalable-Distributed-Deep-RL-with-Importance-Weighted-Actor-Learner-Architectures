@@ -49,9 +49,9 @@ class IMPALA:
         self.vs = tf.transpose(self.transpose_vs, perm=[1, 0])
         self.pg_advantage = tf.transpose(self.transpose_pg_advantage, perm=[1, 0])
         
-        self.pi_loss = vtrace.compute_policy_gradient_loss(self.policy, self.a_ph, self.pg_advantage)
-        self.value_loss = 0.5 * vtrace.compute_baseline_loss(self.vs - self.value)
-        self.entropy = vtrace.compute_entropy_loss(self.policy)
+        self.pi_loss = vtrace.compute_policy_gradient_loss(self.policy[:, 0], self.a_ph[:, 0], self.pg_advantage[:, 0])
+        self.value_loss = 0.5 * vtrace.compute_baseline_loss(self.vs[:, 0] - self.value[:, 0])
+        self.entropy = vtrace.compute_entropy_loss(self.policy[:, 0])
 
         self.total_loss = self.pi_loss + self.value_loss + self.entropy * self.coef
 
