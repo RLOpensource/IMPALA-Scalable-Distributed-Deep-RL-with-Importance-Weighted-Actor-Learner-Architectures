@@ -62,10 +62,13 @@ class IMPALA:
 
     def train(self, state, next_state, reward, done, action, behavior_policy):
         unrolled_state = [state[i:i+self.unroll] for i in range(len(state)-self.unroll+1)]
+        unrolled_next_state = [next_state[i:i+self.unroll] for i in range(len(state)-self.unroll+1)]
         unrolled_reward = [reward[i:i+self.unroll] for i in range(len(state)-self.unroll+1)]
         unrolled_done = [done[i:i+self.unroll] for i in range(len(state)-self.unroll+1)]
         unrolled_behavior_policy = [behavior_policy[i:i+self.unroll] for i in range(len(state)-self.unroll+1)]
         unrolled_action = [action[i:i+self.unroll] for i in range(len(state)-self.unroll+1)]
+
+        print(np.stack(unrolled_state).shape)
 
         feed={
             self.s_ph: unrolled_state,

@@ -8,7 +8,6 @@ import utils
 import tensorboardX
 import numpy
 import gym
-import buffer
 
 class Agent(threading.Thread):
     def __init__(self, session, coord, name, global_network, reward_clip, lock):
@@ -35,9 +34,6 @@ class Agent(threading.Thread):
     def run(self):
         self.sess.run(self.global_to_local)
         self.env = gym.make('CartPole-v1')
-
-        temp_buffer = buffer.temp_buffer(capacity=int(config.unroll))
-        impala_buffer = buffer.impala_buffer(capacity=int(config.send_size))
         
         done = False
         state = self.env.reset()

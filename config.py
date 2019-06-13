@@ -6,7 +6,7 @@ output_size = 2
 activation = tf.nn.relu
 final_activation = None
 hidden = [512, 512, 512]
-unroll = 3
+unroll = 5
 entropy_coef = 0.00025
 reward_clip = ['tanh', 'abs_one', 'no_clip']
 
