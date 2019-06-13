@@ -47,6 +47,13 @@ class Agent(threading.Thread):
         total_max_prob = 0
         loss_step = 0
 
+        episode_state = []
+        episode_next_state = []
+        episode_reward = []
+        episode_done = []
+        episode_action = []
+        episode_behavior_policy = []
+
         writer = tensorboardX.SummaryWriter('runs/'+self.name)
 
         while True:
@@ -65,48 +72,35 @@ class Agent(threading.Thread):
                 else:
                     reward = -1
 
-            temp_buffer.append(
-                state=state,
-                next_state=next_state,
-                action=action,
-                reward=reward,
-                done=done,
-                behavior_policy=behavior_policy
-            )
-            trajectory = temp_buffer.sample()
-            if trajectory is not None:
-                impala_buffer.append(
-                    state=trajectory[0],
-                    next_state=trajectory[1],
-                    action=trajectory[2],
-                    reward=trajectory[3],
-                    done=trajectory[4],
-                    behavior_policy=trajectory[5]
-                )
-            train_data = impala_buffer.sample(config.send_size, 0)
-            if train_data is not None:
-                loss_step += 1
-                train_length = np.arange(config.send_size)
-                np.random.shuffle(train_length)
-                train_idx = train_length[:config.batch_size]
-                lock.acquire()
-                pi_loss, value_loss, entropy, gradient = self.global_network.train(
-                    state=[train_data[0][i] for i in train_idx],
-                    next_state=[train_data[1][i] for i in train_idx],
-                    reward=[train_data[2][i] for i in train_idx],
-                    done=[train_data[3][i] for i in train_idx],
-                    action=[train_data[4][i] for i in train_idx],
-                    behavior_policy=[train_data[5][i] for i in train_idx]
-                )
-                self.sess.run(self.global_to_local)
-                lock.release()
-                writer.add_scalar('pi_loss', pi_loss, loss_step)
-                writer.add_scalar('value_loss', value_loss, loss_step)
-                writer.add_scalar('entropy', entropy, loss_step)
+            episode_state.append(state)
+            episode_next_state.append(next_state)
+            episode_reward.append(reward)
+            episode_done.append(done)
+            episode_action.append(action)
+            episode_behavior_policy.append(behavior_policy)
 
             state = next_state
 
             if done:
+                lock.acquire()
+                pi_loss, value_loss, entropy = self.global_network.train(
+                    state=np.stack(episode_state),
+                    next_state=np.stack(episode_next_state),
+                    reward=np.stack(episode_reward),
+                    done=np.stack(episode_done),
+                    action=np.stack(episode_action),
+                    behavior_policy=np.stack(episode_behavior_policy))
+                self.sess.run(self.global_to_local)
+                lock.release()
+                episode_state = []
+                episode_next_state = []
+                episode_reward = []
+                episode_done = []
+                episode_action = []
+                episode_behavior_policy = []
+                writer.add_scalar('pi_loss', pi_loss, episode)
+                writer.add_scalar('value_loss', value_loss, episode)
+                writer.add_scalar('entropy', entropy, episode)
                 writer.add_scalar('score', score, episode)
                 writer.add_scalar('max_prob', total_max_prob / episode_step, episode)
                 print(self.name, episode, score, total_max_prob / episode_step)

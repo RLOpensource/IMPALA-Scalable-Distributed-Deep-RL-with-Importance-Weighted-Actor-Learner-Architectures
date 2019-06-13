@@ -61,12 +61,18 @@ class IMPALA:
         self.train_op = self.optimizer.apply_gradients(zip(self.clipped_gradients, self.gradient_variable))
 
     def train(self, state, next_state, reward, done, action, behavior_policy):
+        unrolled_state = [state[i:i+self.unroll] for i in range(len(state)-self.unroll+1)]
+        unrolled_reward = [reward[i:i+self.unroll] for i in range(len(state)-self.unroll+1)]
+        unrolled_done = [done[i:i+self.unroll] for i in range(len(state)-self.unroll+1)]
+        unrolled_behavior_policy = [behavior_policy[i:i+self.unroll] for i in range(len(state)-self.unroll+1)]
+        unrolled_action = [action[i:i+self.unroll] for i in range(len(state)-self.unroll+1)]
+
         feed={
-            self.s_ph: state,
-            self.r_ph: reward,
-            self.d_ph: done,
-            self.a_ph: action,
-            self.behavior_policy: behavior_policy
+            self.s_ph: unrolled_state,
+            self.r_ph: unrolled_reward,
+            self.d_ph: unrolled_done,
+            self.a_ph: unrolled_action,
+            self.behavior_policy: unrolled_behavior_policy
         }
         
         policy_loss, value_loss, entropy, gradient, _ = self.sess.run(
@@ -74,7 +80,7 @@ class IMPALA:
             feed_dict=feed
         )
         
-        return policy_loss, value_loss, entropy, gradient
+        return policy_loss, value_loss, entropy
 
     def variable_to_network(self, variable):
         feed_dict={i:j for i, j in zip(self.from_list, variable)}
