@@ -11,8 +11,9 @@ import gym
 import buffer
 
 class Agent(threading.Thread):
-    def __init__(self, session, coord, name, global_network, reward_clip):
+    def __init__(self, session, coord, name, global_network, reward_clip, lock):
         super(Agent, self).__init__()
+        self.lock = lock
         self.sess = session
         self.coord = coord
         self.name = name
@@ -88,6 +89,7 @@ class Agent(threading.Thread):
                 train_length = np.arange(config.send_size)
                 np.random.shuffle(train_length)
                 train_idx = train_length[:config.batch_size]
+                lock.acquire()
                 pi_loss, value_loss, entropy, gradient = self.global_network.train(
                     state=[train_data[0][i] for i in train_idx],
                     next_state=[train_data[1][i] for i in train_idx],
@@ -97,6 +99,7 @@ class Agent(threading.Thread):
                     behavior_policy=[train_data[5][i] for i in train_idx]
                 )
                 self.sess.run(self.global_to_local)
+                lock.release()
                 writer.add_scalar('pi_loss', pi_loss, loss_step)
                 writer.add_scalar('value_loss', value_loss, loss_step)
                 writer.add_scalar('entropy', entropy, loss_step)
@@ -121,6 +124,7 @@ if __name__ == '__main__':
     coord = tf.train.Coordinator()
 
     reward_clip = config.reward_clip[1]
+    lock = threading.Lock()
 
     global_network = impala.IMPALA(
         sess=sess,
@@ -144,7 +148,8 @@ if __name__ == '__main__':
             coord=coord,
             name='thread_{}'.format(i),
             global_network=global_network,
-            reward_clip=reward_clip
+            reward_clip=reward_clip,
+            lock=lock
         )
 
         thread_list.append(single_agent)
