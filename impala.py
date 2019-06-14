@@ -17,10 +17,12 @@ class IMPALA:
         self.discount_factor = 0.99
         self.lr = 0.00048
         self.unroll = unroll
+        self.trajectory_size = unroll + 1
         self.coef = coef
         self.reward_clip = reward_clip
 
         self.s_ph = tf.placeholder(tf.float32, shape=[None, self.unroll, *self.state_shape])
+        self.ns_ph = tf.placeholder(tf.float32, shape=[None, self.unroll, *self.state_shape])
         self.a_ph = tf.placeholder(tf.int32, shape=[None, self.unroll])
         self.d_ph = tf.placeholder(tf.bool, shape=[None, self.unroll])
         self.behavior_policy = tf.placeholder(tf.float32, shape=[None, self.unroll, self.output_size])
@@ -36,21 +38,24 @@ class IMPALA:
 
         self.discounts = tf.to_float(~self.d_ph) * self.discount_factor
 
-        self.policy, self.value = core.build_model(
-            self.s_ph, self.hidden, self.activation, self.output_size,
+        self.policy, self.value, self.next_value = core.build_model(
+            self.s_ph, self.ns_ph, self.hidden, self.activation, self.output_size,
             self.final_activation, self.state_shape, self.unroll, name
         )
 
         self.policy_probability = tf.nn.softmax(self.policy)
 
-        self.transpose_vs, self.transpose_pg_advantage = vtrace.from_logits(self.behavior_policy, self.policy, self.a_ph,
-                                         self.discounts, self.clipped_rewards, self.value)
+        self.transpose_vs, self.transpose_clipped_rho = vtrace.from_logits(self.behavior_policy, self.policy, self.a_ph,
+                                         self.discounts, self.clipped_rewards, self.value, self.next_value)
 
         self.vs = tf.transpose(self.transpose_vs, perm=[1, 0])
-        self.pg_advantage = tf.transpose(self.transpose_pg_advantage, perm=[1, 0])
-        
-        self.pi_loss = vtrace.compute_policy_gradient_loss(self.policy, self.a_ph, self.pg_advantage)
-        self.value_loss = 0.5 * vtrace.compute_baseline_loss(self.vs - self.value)
+        self.rho = tf.transpose(self.transpose_clipped_rho, perm=[1, 0])
+
+        self.vs_ph = tf.placeholder(tf.float32, shape=[None, self.unroll])
+        self.pg_advantage_ph = tf.placeholder(tf.float32, shape=[None, self.unroll])
+
+        self.value_loss = vtrace.compute_value_loss(self.vs_ph, self.value)
+        self.pi_loss = vtrace.compute_policy_loss(self.policy, self.a_ph, self.pg_advantage_ph)
         self.entropy = vtrace.compute_entropy_loss(self.policy)
 
         self.total_loss = self.pi_loss + self.value_loss + self.entropy * self.coef
@@ -61,20 +66,75 @@ class IMPALA:
         self.train_op = self.optimizer.apply_gradients(zip(self.clipped_gradients, self.gradient_variable))
 
     def train(self, state, next_state, reward, done, action, behavior_policy):
-        feed={
-            self.s_ph: state,
-            self.r_ph: reward,
-            self.d_ph: done,
-            self.a_ph: action,
-            self.behavior_policy: behavior_policy
-        }
+        unrolled_state = np.stack([state[i:i+self.trajectory_size] for i in range(len(state)-self.trajectory_size+1)])
+        unrolled_next_state = np.stack([next_state[i:i+self.trajectory_size] for i in range(len(state)-self.trajectory_size+1)])
+        unrolled_reward = np.stack([reward[i:i+self.trajectory_size] for i in range(len(state)-self.trajectory_size+1)])
+        unrolled_done = np.stack([done[i:i+self.trajectory_size] for i in range(len(state)-self.trajectory_size+1)])
+        unrolled_behavior_policy = np.stack([behavior_policy[i:i+self.trajectory_size] for i in range(len(state)-self.trajectory_size+1)])
+        unrolled_action = np.stack([action[i:i+self.trajectory_size] for i in range(len(state)-self.trajectory_size+1)])
+
+        unrolled_length = len(unrolled_state)
+        sampled_range = np.arange(unrolled_length)
+        np.random.shuffle(sampled_range)
+        shuffled_idx = sampled_range[:32]
+
+        # get vs_plus_1
+        s_ph = np.stack([unrolled_state[i, 1:] for i in shuffled_idx])
+        ns_ph = np.stack([unrolled_next_state[i, 1:] for i in shuffled_idx])
+        r_ph = np.stack([unrolled_reward[i, 1:] for i in shuffled_idx])
+        d_ph = np.stack([unrolled_done[i, 1:] for i in shuffled_idx])
+        b_ph = np.stack([unrolled_behavior_policy[i, 1:] for i in shuffled_idx])
+        a_ph = np.stack([unrolled_action[i, 1:] for i in shuffled_idx])
+
+        feed_dict = {
+            self.s_ph: s_ph,
+            self.ns_ph: ns_ph,
+            self.r_ph: r_ph,
+            self.d_ph: d_ph,
+            self.a_ph: a_ph,
+            self.behavior_policy: b_ph}
+
+        vs_plus_1 = self.sess.run(
+            self.vs,
+            feed_dict)
+
+        # get vs
+        s_ph = np.stack([unrolled_state[i, :-1] for i in shuffled_idx])
+        ns_ph = np.stack([unrolled_next_state[i, :-1] for i in shuffled_idx])
+        r_ph = np.stack([unrolled_reward[i, :-1] for i in shuffled_idx])
+        d_ph = np.stack([unrolled_done[i, :-1] for i in shuffled_idx])
+        b_ph = np.stack([unrolled_behavior_policy[i, :-1] for i in shuffled_idx])
+        a_ph = np.stack([unrolled_action[i, :-1] for i in shuffled_idx])
+
+        feed_dict = {
+            self.s_ph: s_ph,
+            self.ns_ph: ns_ph,
+            self.r_ph: r_ph,
+            self.d_ph: d_ph,
+            self.a_ph: a_ph,
+            self.behavior_policy: b_ph}
+
+        vs, rho, value = self.sess.run(
+            [self.vs, self.rho, self.value],
+            feed_dict)
         
-        policy_loss, value_loss, entropy, gradient, _ = self.sess.run(
-            [self.pi_loss, self.value_loss, self.entropy, self.gradients, self.train_op],
-            feed_dict=feed
-        )
-        
-        return policy_loss, value_loss, entropy, gradient
+        pg_advantage = rho * (r_ph + 0.99 * (1-d_ph) * vs_plus_1 - value)
+
+        feed_dict = {
+            self.s_ph: s_ph,
+            self.ns_ph: ns_ph,
+            self.r_ph: r_ph,
+            self.d_ph: d_ph,
+            self.a_ph: a_ph,
+            self.behavior_policy: b_ph,
+            self.vs_ph: vs,
+            self.pg_advantage_ph: pg_advantage}
+
+        pi_loss, value_loss, entropy, _ = self.sess.run(
+            [self.pi_loss, self.value_loss, self.entropy, self.train_op],
+            feed_dict)
+
+        return pi_loss, value_loss, entropy
 
     def variable_to_network(self, variable):
         feed_dict={i:j for i, j in zip(self.from_list, variable)}
@@ -100,77 +160,3 @@ class IMPALA:
             self.behavior_policy: behavior_policy,
             self.r_ph: reward
         }
-
-
-if __name__ == '__main__':
-    np.random.seed(0)
-    tf.set_random_seed(0)
-
-    episode_length = config.send_size
-    batch_size = config.batch_size
-    unroll = config.unroll
-
-    state_shape = config.state_shape
-    output_size = config.output_size
-
-    state = np.random.rand(episode_length, *state_shape)
-    next_state = [state[i+1] for i in range(episode_length - 1)]
-    next_state.append(np.random.rand(*state_shape))
-    next_state = np.stack(next_state)
-
-    done = []
-    for i in range(episode_length):
-        if ((i+1) % 20) == 0:
-            done.append(True)
-        else:
-            done.append(False)
-    
-    reward = [np.random.choice(3, p=[0.2, 0.7, 0.1])-1 for i in range(episode_length)]
-    action = [np.random.choice(output_size, p=[0.3, 0.4, 0.3]) for i in range(episode_length)]
-    behavior_policy = [np.random.rand(output_size)-0.5 for i in range(episode_length)]
-    
-    start_index = np.arange(episode_length-unroll)
-    np.random.shuffle(start_index)
-    sample_start_index = np.stack(start_index[:batch_size])
-    sample_end_index = np.stack(sample_start_index) + unroll
-
-    sampled_state = [state[s:e] for s, e in zip(sample_start_index, sample_end_index)]
-    sampled_next_state = [next_state[s:e] for s, e in zip(sample_start_index, sample_end_index)]
-    sampled_reward = [reward[s:e] for s, e in zip(sample_start_index, sample_end_index)]
-    sampled_action = [action[s:e] for s, e in zip(sample_start_index, sample_end_index)]
-    sampled_behavior_policy = [behavior_policy[s:e] for s, e in zip(sample_start_index, sample_end_index)]
-    sampled_done = [done[s:e] for s, e in zip(sample_start_index, sample_end_index)]
-
-    ## sampled data shape
-    ## sampled_state = [batch_size, unroll, *state_shape]
-    ## sampled_next_state = [batch_size, unroll, *state_shape]
-    ## sampled_reward = [batch_size, unroll]
-    ## sampled_done = [batch_size, unroll]
-    ## sampled_action = [batch_size, unroll]
-    ## sampled_behavior_policy = [batch_size, unroll, output_size]
-
-    sess = tf.Session()
-
-    agent = IMPALA(
-        sess=sess,
-        name='global',
-        unroll=config.unroll,
-        state_shape=state_shape,
-        output_size=output_size,
-        activation=config.activation,
-        final_activation=config.final_activation,
-        hidden=config.hidden,
-        coef=config.entropy_coef,
-        reward_clip=config.reward_clip[1]
-    )
-
-    init = tf.global_variables_initializer()
-    sess.run(init)
-    
-    agent.test(
-        state=sampled_state,
-        action=sampled_action,
-        reward=sampled_reward,
-        done=sampled_done,
-        behavior_policy=sampled_behavior_policy
-    )

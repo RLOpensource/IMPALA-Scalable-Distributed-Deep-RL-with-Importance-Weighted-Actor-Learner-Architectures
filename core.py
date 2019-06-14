@@ -30,13 +30,18 @@ def model(x, hidden, activation, output_size, final_activation):
     value = tf.squeeze(mlp(x, hidden, activation, 1, None))
     return actor, value
 
-def build_model(s, hidden, activation, output_size, final_activation, state_shape, unroll, name):
+def build_model(s, ns, hidden, activation, output_size, final_activation, state_shape, unroll, name):
     state = tf.reshape(s, [-1, *state_shape])
+    next_state = tf.reshape(ns, [-1, *state_shape])
 
     if len(state_shape) == 1:
         with tf.variable_scope(name):
             policy, value = model(
                 state, hidden, activation, output_size, final_activation
+            )
+        with tf.variable_scope(name, reuse=True):
+            _, next_value = model(
+                next_state, hidden, activation, output_size, final_activation
             )
 
     elif len(state_shape) == 3:
@@ -44,8 +49,13 @@ def build_model(s, hidden, activation, output_size, final_activation, state_shap
             policy, value = cnn_model(
                 state, hidden, activation, output_size, final_activation
             )
+        with tf.variable_scope(name, reuse=True):
+            _, next_value = cnn_model(
+                next_state, hidden, activation, output_size, final_activation
+            )
 
     policy = tf.reshape(policy, [-1, unroll, output_size])
     value = tf.reshape(value, [-1, unroll])
+    next_value = tf.reshape(next_value, [-1, unroll])
 
-    return policy, value
+    return policy, value, next_value
