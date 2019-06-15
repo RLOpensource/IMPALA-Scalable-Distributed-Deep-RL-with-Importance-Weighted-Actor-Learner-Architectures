@@ -63,13 +63,6 @@ class Agent(threading.Thread):
 
                 score += reward
 
-                reward = 0
-                if done:
-                    if score == 500:
-                        reward = 1
-                    else:
-                        reward = -1
-
                 episode_state.append(state)
                 episode_next_state.append(next_state)
                 episode_reward.append(reward)
