@@ -8,6 +8,7 @@ import utils
 import tensorboardX
 import numpy
 import gym
+import copy
 
 class Agent(threading.Thread):
     def __init__(self, session, coord, name, global_network, reward_clip, lock):
@@ -33,10 +34,13 @@ class Agent(threading.Thread):
     
     def run(self):
         self.sess.run(self.global_to_local)
-        self.env = gym.make('CartPole-v1')
+        self.env = gym.make('PongDeterministic-v4')
         
         done = False
-        state = self.env.reset()
+        frame = self.env.reset()
+        frame = utils.pipeline(frame)
+        history = np.stack((frame, frame, frame, frame), axis=2)
+        state = copy.deepcopy(history)
         score = 0
         episode = 0
         episode_step = 0
@@ -56,17 +60,26 @@ class Agent(threading.Thread):
             for i in range(128):
 
                 action, behavior_policy, max_prob = self.local_network.get_policy_and_action(state)
+
                 episode_step += 1
                 total_max_prob += max_prob
             
-                next_state, reward, done, _ = self.env.step(action)
+                frame, reward, done, _ = self.env.step(action)
+                frame = utils.pipeline(frame)
+                history[:, :, :-1] = history[:, :, 1:]
+                history[:, :, -1] = frame
+                next_state = copy.deepcopy(history)
 
                 score += reward
+
+                d = False
+                if reward == 1 or reward == -1:
+                    d = True
 
                 episode_state.append(state)
                 episode_next_state.append(next_state)
                 episode_reward.append(reward)
-                episode_done.append(done)
+                episode_done.append(d)
                 episode_action.append(action)
                 episode_behavior_policy.append(behavior_policy)
 
