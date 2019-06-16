@@ -35,14 +35,16 @@ class Agent(threading.Thread):
     def run(self):
         self.sess.run(self.global_to_local)
         self.env = gym.make('PongDeterministic-v4')
+        if self.name == 'thread_0':
+            self.env = gym.wrappers.Monitor(self.env, 'save-mov', video_callable=lambda episode_id: episode_id%10==0)
         
         done = False
         frame = self.env.reset()
         frame = utils.pipeline(frame)
         history = np.stack((frame, frame, frame, frame), axis=2)
         state = copy.deepcopy(history)
-        score = 0
         episode = 0
+        score = 0
         episode_step = 0
         total_max_prob = 0
         loss_step = 0
@@ -58,7 +60,6 @@ class Agent(threading.Thread):
             episode_action = []
             episode_behavior_policy = []
             for i in range(128):
-
                 action, behavior_policy, max_prob = self.local_network.get_policy_and_action(state)
 
                 episode_step += 1
@@ -95,12 +96,13 @@ class Agent(threading.Thread):
                     episode += 1
                     score  = 0
                     done = False
+                    if self.name == 'thread_0':
+                        self.env.close()
                     frame = self.env.reset()
                     frame = utils.pipeline(frame)
                     history = np.stack((frame, frame, frame, frame), axis=2)
                     state = copy.deepcopy(history)
 
-            # self.lock.acquire()
             pi_loss, value_loss, entropy = self.global_network.train(
                 state=np.stack(episode_state),
                 next_state=np.stack(episode_next_state),
@@ -112,4 +114,3 @@ class Agent(threading.Thread):
             writer.add_scalar('pi_loss', pi_loss, loss_step)
             writer.add_scalar('value_loss', value_loss, loss_step)
             writer.add_scalar('entropy', entropy, loss_step)
-            # self.lock.release()
