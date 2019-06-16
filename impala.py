@@ -15,7 +15,7 @@ class IMPALA:
         self.clip_rho_threshold = 1.0
         self.clip_pg_rho_threshold = 1.0
         self.discount_factor = 0.99
-        self.lr = 0.00048
+        self.lr = 0.001
         self.unroll = unroll
         self.trajectory_size = unroll + 1
         self.coef = coef
@@ -60,10 +60,13 @@ class IMPALA:
 
         self.total_loss = self.pi_loss + self.value_loss + self.entropy * self.coef
 
+        #self.optimizer = tf.train.RMSPropOptimizer(self.lr, epsilon=0.01, momentum=0.0, decay=0.99)
+        #self.gradients, self.gradient_variable = zip(*self.optimizer.compute_gradients(self.total_loss))
+        #self.clipped_gradients, _ = tf.clip_by_global_norm(self.gradients, 40.0)
+        #self.train_op = self.optimizer.apply_gradients(zip(self.clipped_gradients, self.gradient_variable))
+
         self.optimizer = tf.train.RMSPropOptimizer(self.lr, epsilon=0.01, momentum=0.0, decay=0.99)
-        self.gradients, self.gradient_variable = zip(*self.optimizer.compute_gradients(self.total_loss))
-        self.clipped_gradients, _ = tf.clip_by_global_norm(self.gradients, 40.0)
-        self.train_op = self.optimizer.apply_gradients(zip(self.clipped_gradients, self.gradient_variable))
+        self.train_op = self.optimizer.minimize(self.total_loss)
 
     def train(self, state, next_state, reward, done, action, behavior_policy):
         unrolled_state = np.stack([state[i:i+self.trajectory_size] for i in range(len(state)-self.trajectory_size+1)])
@@ -118,7 +121,7 @@ class IMPALA:
             [self.vs, self.rho, self.value],
             feed_dict)
         
-        pg_advantage = rho * (r_ph + 0.99 * (1-d_ph) * vs_plus_1 - value)
+        pg_advantage = rho * (r_ph + self.discount_factor * (1-d_ph) * vs_plus_1 - value)
 
         feed_dict = {
             self.s_ph: s_ph,

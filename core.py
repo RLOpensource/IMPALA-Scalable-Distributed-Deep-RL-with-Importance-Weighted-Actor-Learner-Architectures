@@ -17,9 +17,9 @@ def mlp(x, hidden, activation, output_size, final_activation):
     return x
 
 def cnn_model(x, hidden, activation, output_size, final_activation):
-    x = tf.layers.conv2d(inputs=x, filters=32, kernel_size=[8, 8], strides=[4, 4], padding='VALID', activation=tf.nn.relu)
-    x = tf.layers.conv2d(inputs=x, filters=64, kernel_size=[4, 4], strides=[2, 2], padding='VALID', activation=tf.nn.relu)
-    x = tf.layers.conv2d(inputs=x, filters=64, kernel_size=[3, 3], strides=[1, 1], padding='VALID', activation=tf.nn.relu)
+    x = tf.layers.conv2d(inputs=x, filters=16, kernel_size=[8, 8], strides=[4, 4], padding='VALID', activation=tf.nn.relu)
+    x = tf.layers.conv2d(inputs=x, filters=32, kernel_size=[4, 4], strides=[2, 2], padding='VALID', activation=tf.nn.relu)
+    x = tf.layers.conv2d(inputs=x, filters=32, kernel_size=[3, 3], strides=[1, 1], padding='VALID', activation=tf.nn.relu)
     x = tf.layers.flatten(x)
     actor = mlp(x, hidden, activation, output_size, final_activation)
     value = tf.squeeze(mlp(x, hidden, activation, 1, None))

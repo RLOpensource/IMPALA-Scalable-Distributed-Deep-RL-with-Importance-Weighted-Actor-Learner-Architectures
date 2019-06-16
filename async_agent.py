@@ -64,7 +64,7 @@ class Agent(threading.Thread):
                 episode_step += 1
                 total_max_prob += max_prob
             
-                frame, reward, done, _ = self.env.step(action)
+                frame, reward, done, _ = self.env.step(action+1)
                 frame = utils.pipeline(frame)
                 history[:, :, :-1] = history[:, :, 1:]
                 history[:, :, -1] = frame
@@ -86,17 +86,21 @@ class Agent(threading.Thread):
                 state = next_state
 
                 if done:
-                    print(self.name, episode, score, total_max_prob / episode_step)
+                    print(self.name, episode, score, total_max_prob / episode_step, episode_step)
                     writer.add_scalar('score', score, episode)
                     writer.add_scalar('max_prob', total_max_prob / episode_step, episode)
+                    writer.add_scalar('episode_step', episode_step, episode)
                     episode_step = 0
                     total_max_prob = 0
                     episode += 1
                     score  = 0
                     done = False
-                    state = self.env.reset()
+                    frame = self.env.reset()
+                    frame = utils.pipeline(frame)
+                    history = np.stack((frame, frame, frame, frame), axis=2)
+                    state = copy.deepcopy(history)
 
-            self.lock.acquire()
+            # self.lock.acquire()
             pi_loss, value_loss, entropy = self.global_network.train(
                 state=np.stack(episode_state),
                 next_state=np.stack(episode_next_state),
@@ -108,4 +112,4 @@ class Agent(threading.Thread):
             writer.add_scalar('pi_loss', pi_loss, loss_step)
             writer.add_scalar('value_loss', value_loss, loss_step)
             writer.add_scalar('entropy', entropy, loss_step)
-            self.lock.release()
+            # self.lock.release()
