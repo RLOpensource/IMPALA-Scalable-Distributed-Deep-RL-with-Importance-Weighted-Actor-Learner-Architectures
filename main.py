@@ -26,7 +26,7 @@ if __name__ == '__main__':
         reward_clip=reward_clip
     )
 
-    n_threads = multiprocessing.cpu_count()
+    n_threads = 16
 
     thread_list = []
 

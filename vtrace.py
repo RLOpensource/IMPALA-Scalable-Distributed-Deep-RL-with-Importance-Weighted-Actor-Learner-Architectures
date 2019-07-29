@@ -5,35 +5,20 @@ def compute_value_loss(vs, value):
     l2_loss = tf.square(error)
     return tf.reduce_sum(l2_loss) * 0.5
 
-def compute_policy_loss(logits, actions, advantages):
-    cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
-        labels=actions, logits=logits)
+def compute_policy_loss(softmax, actions, advantages, output_size):
+    onehot_action = tf.one_hot(actions, output_size)
+    selected_softmax = tf.reduce_sum(softmax * onehot_action, axis=2)
+    cross_entropy = tf.log(selected_softmax)
     advantages = tf.stop_gradient(advantages)
     policy_gradient_loss_per_timestep = cross_entropy[:, 0] * advantages[:, 0]
-    return tf.reduce_sum(policy_gradient_loss_per_timestep)
+    return -tf.reduce_sum(policy_gradient_loss_per_timestep)
 
-def compute_entropy_loss(logits):
-    policy =  tf.nn.softmax(logits)
-    log_policy = tf.nn.log_softmax(logits)
+def compute_entropy_loss(softmax):
+    policy = softmax
+    log_policy = tf.log(softmax)
     entropy_per_time_step = -policy * log_policy
     entropy_per_time_step = tf.reduce_sum(entropy_per_time_step[:, 0], axis=1)
     return -tf.reduce_sum(entropy_per_time_step)
-
-def compute_policy_gradient_loss(logits, actions, advantages):
-    cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
-        labels=actions, logits=logits)
-    advantages = tf.stop_gradient(advantages)
-    policy_gradient_loss_per_timestep = cross_entropy * advantages
-    return tf.reduce_sum(policy_gradient_loss_per_timestep)
-
-def compute_baseline_loss(advantages):
-    return .5 * tf.reduce_sum(tf.square(advantages))
-
-# def compute_entropy_loss(logits):
-#     policy = tf.nn.softmax(logits)
-#     log_policy = tf.nn.log_softmax(logits)
-#     entropy_per_time_step = tf.reduce_sum(-policy * log_policy, axis=-1)
-#     return -tf.reduce_sum(entropy_per_time_step)
 
 def log_probs_from_logits_and_actions(policy_logits, actions):
     policy_logits.shape.assert_has_rank(3)
@@ -47,6 +32,37 @@ def from_logits(behavior_policy_logits, target_policy_logits, actions,
 
     target_action_log_probs = log_probs_from_logits_and_actions(target_policy_logits, actions)
     behavior_action_log_probs = log_probs_from_logits_and_actions(behavior_policy_logits, actions)
+    log_rhos = target_action_log_probs - behavior_action_log_probs
+
+    transpose_log_rhos = tf.transpose(log_rhos, perm=[1, 0])
+    transpose_discounts = tf.transpose(discounts, perm=[1, 0])
+    transpose_rewards = tf.transpose(rewards, perm=[1, 0])
+    transpose_values = tf.transpose(values, perm=[1, 0])
+    transpose_next_value = tf.transpose(next_value, perm=[1, 0])
+
+    transpose_vs, transpose_clipped_rho = from_importance_weights(
+        log_rhos=transpose_log_rhos,
+        discounts=transpose_discounts,
+        rewards=transpose_rewards,
+        values=transpose_values,
+        bootstrap_value=transpose_next_value[-1],
+        clip_rho_threshold=clip_rho_threshold,
+        clip_pg_rho_threshold=clip_pg_rho_threshold)
+
+    return transpose_vs, transpose_clipped_rho
+
+def log_probs_from_softmax_and_actions(policy_softmax, actions, action_size):
+    onehot_action = tf.one_hot(actions, action_size)
+    selected_softmax = tf.reduce_sum(policy_softmax * onehot_action, axis=2)
+    log_prob = tf.log(selected_softmax)
+    return log_prob
+
+def from_softmax(behavior_policy_softmax, target_policy_softmax, actions,
+                 discounts, rewards, values, next_value, action_size,
+                 clip_rho_threshold=1.0, clip_pg_rho_threshold=1.0):
+            
+    target_action_log_probs = log_probs_from_softmax_and_actions(target_policy_softmax, actions, action_size)
+    behavior_action_log_probs = log_probs_from_softmax_and_actions(behavior_policy_softmax, actions, action_size)
     log_rhos = target_action_log_probs - behavior_action_log_probs
 
     transpose_log_rhos = tf.transpose(log_rhos, perm=[1, 0])
