@@ -40,13 +40,13 @@ class IMPALA:
 
         self.policy, self.value, self.next_value = core.build_model(
             self.s_ph, self.ns_ph, self.hidden, self.activation, self.output_size,
-            self.final_activation, self.state_shape, self.unroll, name
-        )
+            self.final_activation, self.state_shape, self.unroll, name)
 
-        self.policy_probability = tf.nn.softmax(self.policy)
-
-        self.transpose_vs, self.transpose_clipped_rho = vtrace.from_logits(self.behavior_policy, self.policy, self.a_ph,
-                                         self.discounts, self.clipped_rewards, self.value, self.next_value)
+        self.transpose_vs, self.transpose_clipped_rho = vtrace.from_softmax(
+            behavior_policy_softmax=self.behavior_policy,
+            target_policy_softmax=self.policy,
+            actions=self.a_ph, discounts=self.discounts, rewards=self.clipped_rewards,
+            values=self.value, next_value=self.next_value, action_size=self.output_size)
 
         self.vs = tf.transpose(self.transpose_vs, perm=[1, 0])
         self.rho = tf.transpose(self.transpose_clipped_rho, perm=[1, 0])
@@ -55,16 +55,10 @@ class IMPALA:
         self.pg_advantage_ph = tf.placeholder(tf.float32, shape=[None, self.unroll])
 
         self.value_loss = vtrace.compute_value_loss(self.vs_ph, self.value)
-        self.pi_loss = vtrace.compute_policy_loss(self.policy, self.a_ph, self.pg_advantage_ph)
         self.entropy = vtrace.compute_entropy_loss(self.policy)
+        self.pi_loss = vtrace.compute_policy_loss(self.policy, self.a_ph, self.pg_advantage_ph, self.output_size)
 
         self.total_loss = self.pi_loss + self.value_loss + self.entropy * self.coef
-
-        #self.optimizer = tf.train.RMSPropOptimizer(self.lr, epsilon=0.01, momentum=0.0, decay=0.99)
-        #self.gradients, self.gradient_variable = zip(*self.optimizer.compute_gradients(self.total_loss))
-        #self.clipped_gradients, _ = tf.clip_by_global_norm(self.gradients, 40.0)
-        #self.train_op = self.optimizer.apply_gradients(zip(self.clipped_gradients, self.gradient_variable))
-
         self.optimizer = tf.train.RMSPropOptimizer(self.lr, epsilon=0.01, momentum=0.0, decay=0.99)
         self.train_op = self.optimizer.minimize(self.total_loss)
 
@@ -149,11 +143,10 @@ class IMPALA:
 
     def get_policy_and_action(self, state):
         state = [state for i in range(self.unroll)]
-        policy, logits = self.sess.run([self.policy_probability, self.policy], feed_dict={self.s_ph: [state]})
+        policy = self.sess.run(self.policy, feed_dict={self.s_ph: [state]})
         policy = policy[0][0]
-        logits = logits[0][0]
         action = np.random.choice(self.output_size, p=policy)
-        return action, logits, max(policy)
+        return action, policy, max(policy)
 
     def test(self, state, action, reward, done, behavior_policy):
         feed_dict={
@@ -161,5 +154,4 @@ class IMPALA:
             self.a_ph: action,
             self.d_ph: done,
             self.behavior_policy: behavior_policy,
-            self.r_ph: reward
-        }
+            self.r_ph: reward}
